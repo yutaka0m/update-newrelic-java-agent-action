@@ -1,0 +1,94 @@
+name: Update NewRelic Java Agent
+
+on:
+#  schedule:
+#    - cron: '0 1 * * MON'
+  workflow_dispatch:
+
+jobs:
+  step:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Check Update
+        run: |
+          # 現在のNewRelic Java Agentバージョンを確認
+          CURRENT_AGENT_VERSION=$(java -jar newrelic/newrelic.jar -v)
+          echo "Current Java Agent Version is ${CURRENT_AGENT_VERSION}"
+          echo "CURRENT_AGENT_VERSION=${CURRENT_AGENT_VERSION}" >> $GITHUB_ENV
+
+          # 最新のNewRelic Java Agentバージョンをダウンロード
+          mkdir -p tmp/new_agent
+          cd tmp/new_agent
+          curl -O "https://download.newrelic.com/newrelic/java-agent/newrelic-agent/current/newrelic-java.zip"
+          unzip newrelic-java.zip
+          ## 最新のNewRelic Java Agentバージョンを確認
+          NEW_AGENT_VERSION=$(java -jar newrelic/newrelic.jar -v)
+          echo "Latest Java Agent Version is ${NEW_AGENT_VERSION}"
+          echo "NEW_AGENT_VERSION=${NEW_AGENT_VERSION}" >> $GITHUB_ENV
+          cd -
+
+          # バージョンアップが必要か確認
+          if [[ ${CURRENT_AGENT_VERSION} = ${NEW_AGENT_VERSION} ]]; then
+            echo "UPDATE=false" >> $GITHUB_ENV
+          else
+            echo "UPDATE=true" >> $GITHUB_ENV
+          fi
+
+      - name: Update Agent
+        if: ${{ env.UPDATE == 'true' }}
+        run: |
+          cp tmp/new_agent/newrelic/newrelic.jar newrelic/newrelic.jar
+          cp tmp/new_agent/newrelic/newrelic-api.jar newrelic/newrelic-api.jar
+
+          # 現在バージョンの変更前newrelic.ymlをダウンロード
+          mkdir -p tmp/current_agent/newrelic
+          cd tmp/current_agent/newrelic
+          curl -O "https://download.newrelic.com/newrelic/java-agent/newrelic-agent/${{ env.CURRENT_AGENT_VERSION }}/newrelic.yml"
+          cd -
+
+          # 現在バージョンと最新バージョンのnewrelic.ymlを比較 差分があればPRに加える
+          DIFF=$(diff ./tmp/new_agent/newrelic/newrelic.yml ./tmp/current_agent/newrelic/newrelic.yml & exit 0)
+          if [[ ${DIFF} != "" ]]; then
+            cp tmp/new_agent/newrelic/newrelic.yml newrelic/newrelic.yml
+          fi
+
+          # 作業フォルダ削除
+          rm -rf tmp
+
+      - name: Create Pull Request
+        id: cpr
+        uses: peter-evans/create-pull-request@548adff9dc6e488601db007a22a15d8a7b75a2b4
+        with:
+          title: "Update NewRelic Java Agent from ${{ env.CURRENT_AGENT_VERSION }} to ${{ env.NEW_AGENT_VERSION }}"
+          commit-message: "Update NewRelic Java Agent from ${{ env.CURRENT_AGENT_VERSION }} to ${{ env.NEW_AGENT_VERSION }}"
+          branch: "github-actions/newrelic-agent-${{ env.NEW_AGENT_VERSION }}"
+          labels: dependencies
+          body: |
+            Update NewRelic Agent from ${{ env.CURRENT_AGENT_VERSION }} to ${{ env.NEW_AGENT_VERSION }}
+          delete-branch: true
+
+      - name: Slack Notification
+        if: ${{ env.UPDATE == 'true' }}
+        run: |
+          run: |
+            curl -X POST \
+              --data-urlencode 'payload={
+                "attachments": [
+                  {
+                    "color": "#2EB886",
+                    "blocks": [
+                      {
+                        "type": "section",
+                        "text": {
+                          "type": "mrkdwn",
+                          "text": ":mega: <!here> NewRelic Java Agentアップデートを確認してください\n ${{ steps.cpr.outputs.pull-request-url }}"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }' \
+            ${{ secrets.SLACK_WEBHOOK_URL }}
