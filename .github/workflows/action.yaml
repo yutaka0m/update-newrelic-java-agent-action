@@ -84,7 +84,7 @@ jobs:
                         "type": "section",
                         "text": {
                           "type": "mrkdwn",
-                          "text": ":mega: <!here> NewRelic Java Agentアップデートを確認してください\n ${{ steps.cpr.outputs.pull-request-url }}"
+                          "text": ":mega: <!here> NewRelic Java Agent is updated n ${{ steps.cpr.outputs.pull-request-url }}"
                         }
                       }
                     ]
